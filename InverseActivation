@@ -1,0 +1,49 @@
+
+import tensorflow as tf
+
+
+# extend kersas Layer base class
+class InverseActivation(tf.keras.layers.Layer):
+    # Note: this is only benificail if the preceding layer's desired activation allows negative outputs (Linear, Tanh) and not (relu, sigmoid)
+    def __init__(self, 
+                 activation_name='relu', 
+                 data_format = 'channels_last',
+                 trainable=True,
+                 name=None,
+                 dtype=None,
+                 dynamic=False,
+                 **kwargs):
+
+        super(InverseActivation, self).__init__(
+            trainable,
+            name,
+            dtype,
+            dynamic)
+
+        self.activation_name = activation_name
+        self.data_format = data_format
+
+    def compute_output_shape(self, input_shape):
+        shape = list(input_shape)
+        if (self.data_format == 'channels_last'):
+            shape[-1] *= 2
+        elif (self.data_format == 'channels_first'):
+            shape[1] *= 2
+        else:
+            # can't do anything if it's not Channels first or last since it has no channels
+            raise Exception('The data_format provided did not have an appropriate value of either "channels_last" or "channels_first" ')
+
+        return tuple(shape)
+
+    def call(self, inputs):
+        #TODO make this generic activation
+        pos = tf.keras.layers.ReLU()(inputs) #tf.keras.activations.Activation(self.activation_name)(inputs)
+        neg = tf.keras.layers.ReLU()(-inputs) #tf.keras.activations.Activation(self.activation_name)(-inputs)
+        
+        if (self.data_format == 'channels_last'):
+            return tf.keras.layers.Concatenate(axis = -1)([pos, neg])
+        elif (self.data_format == 'channels_first'):
+            return tf.keras.layers.Concatenate(axis = 1)([pos, neg])
+        else:
+            # can't do anything if it's not Channels first or last since it has no channels
+            raise Exception('The data_format provided did not have an appropriate value of either "channels_last" or "channels_first" ')
