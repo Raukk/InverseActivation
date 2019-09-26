@@ -49,8 +49,8 @@ Fashion MNIST(w/ data aug): Validation Accuracy:
 ## Results when combined with my other crazy idea.
 MNIST(w/ data aug): Validation Accuracy: > 99.5%
 MNIST(w/ data aug): Validation Loss: < 0.010
-
-
+Fashion MNIST(w/ data aug): Validation Accuracy: > 94.1%
+Fashion MNIST(w/ data aug): Validation Loss: < 0.1692
 
 
 
