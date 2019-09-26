@@ -1,5 +1,7 @@
 # InverseActivation
-This is a single (simple) Keras Layer that can be used with/in place of Relu (or similar) Activation functions. The goal is to reduce the number of computations required by reusing existing computations.
+This is a single (simple) Keras Layer that can be used with/in place of Relu (or similar) Activation functions. The goal is to reduce the number of computations required by reusing existing computations. 
+
+Implemented for TF.Keras.
 
 ---
 
@@ -19,6 +21,9 @@ Another Theory I have is that this may help with Back Prop, eliminating the need
 ---
 
 # Ussage Note
+This is coded for TF.Keras, though it would be trivial to adapt it to plain Keras.
+
+## Note: Doubles Output Channel Count 
 This will Double the number of channels of the output that it activates, and this can result in the output channel count being bigger than you expect. 
 
 ## Also Note
