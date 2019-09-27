@@ -18,6 +18,19 @@ My Big assumption is that even at deeper levels of the NN this functionality wil
 
 Another Theory I have is that this may help with Back Prop, eliminating the need for fixes like leaky ReLU. But I believe that this still provides an appropriate level of non-linearity, because they are seperated into seperate outputs (so it functions the same as 2 kernels learning the inverse of eachother, except their learning is tied together).
 
+To check for non-linearity I tested by removing all but the dense layers Relu and Softmax while remnovingthe activation from this layer. The results of that test show that this layer scored much better on fashion MNIST than the all Liniear version.
+
+
+Test score: 0.21352055146694182
+
+Test accuracy: 0.9235
+
+VS
+
+Test score: 0.1780399688757956
+
+Test accuracy: 0.9433
+
 ---
 
 # Ussage Note
@@ -32,25 +45,36 @@ This needs to be applied as the Activation, such that the Input to it should be 
 ---
 
 # Evaluation
-My initial Evaluation is, this does not significantly harm the ability of a NN to learn and operate. 
-
+My initial Evaluation is, this does not significantly harm the ability of a NN to learn and operate. It's possible that it improves the operation of the DNN, but, more testing is needed (it may simply be the increased number of parameters).
 
 
 I've done simple evaluation using this code on MNIST and Fashion MNIST and it performs well. 
 I will continue to use it on other harder problems and post their results here. 
 
 
-If you use this on your own, please let me know your experince with it
+If you use this on your own, please let me know your experince with it, and if you're willing, let me post your results here.
+
 
 ## Actual Results
-MNIST (w/ data aug): Validation Accuracy: 
-Fashion MNIST(w/ data aug): Validation Accuracy:
 
-## Results when combined with my other crazy idea.
-MNIST(w/ data aug): Validation Accuracy: > 99.5%
-MNIST(w/ data aug): Validation Loss: < 0.010
-Fashion MNIST(w/ data aug): Validation Accuracy: > 94.1%
-Fashion MNIST(w/ data aug): Validation Loss: < 0.1692
+MNIST (w/ data aug): Validation Accuracy: 99.66%
+
+MNIST(w/ data aug): Validation Loss: 0.01109
+
+Fashion MNIST(w/ data aug): Validation Accuracy: 93.9%
+
+Fashion MNIST(w/ data aug): Validation Loss: 0.1759
+
+
+## Results when combined with my other crazy ideas.
+
+MNIST(w/ data aug): Validation Accuracy: 99.59%
+
+MNIST(w/ data aug): Validation Loss: 0.0122
+
+Fashion MNIST(w/ data aug): Validation Accuracy: 94.51%
+
+Fashion MNIST(w/ data aug): Validation Loss: 0.1637
 
 
 
