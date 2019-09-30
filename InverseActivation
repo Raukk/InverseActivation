@@ -6,7 +6,7 @@ import tensorflow as tf
 class InverseActivation(tf.keras.layers.Layer):
     # Note: this is only benificail if the preceding layer's desired activation allows negative outputs (Linear, Tanh) and not (relu, sigmoid)
     def __init__(self, 
-                 activation_name='relu', 
+                 activation_layer=None, 
                  data_format = 'channels_last',
                  trainable=True,
                  name=None,
@@ -20,7 +20,9 @@ class InverseActivation(tf.keras.layers.Layer):
             dtype,
             dynamic)
 
-        self.activation_name = activation_name
+        self.activation_layer = activation_layer
+        if (self.activation_layer is None):
+            self.activation_layer = tf.keras.layers.ReLU(1.0)
         self.data_format = data_format
 
     def compute_output_shape(self, input_shape):
@@ -36,9 +38,8 @@ class InverseActivation(tf.keras.layers.Layer):
         return tuple(shape)
 
     def call(self, inputs):
-        #TODO make this generic activation
-        pos = tf.keras.layers.ReLU()(inputs) #tf.keras.activations.Activation(self.activation_name)(inputs)
-        neg = tf.keras.layers.ReLU()(-inputs) #tf.keras.activations.Activation(self.activation_name)(-inputs)
+        pos = self.activation_layer(inputs) 
+        neg = self.activation_layer(-inputs) 
         
         if (self.data_format == 'channels_last'):
             return tf.keras.layers.Concatenate(axis = -1)([pos, neg])
