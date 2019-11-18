@@ -1,4 +1,5 @@
 
+
 import math
 import tensorflow as tf
 
@@ -99,6 +100,7 @@ class MonsteraBase(tf.keras.layers.Layer):
 
 
     Implementation Concerns:
+        Channels First is recomended for performance reasons (but results may vary)
         For small numbers of filters, this may not reduce the number of computations required.
         This layer uses fewer parameters and when combined with Depthwise Convolutions, may cause the network to be under-paramertized.
         For any Network that is memory bottlenecked, like MobilenetV2, this will likely perform worse when using the Default TF implementation.
@@ -247,6 +249,7 @@ class MonsteraBase(tf.keras.layers.Layer):
         self.input_channels = None # The number of Channels in the Input data
         self.input_shape = None # Stores a copy of the input dimensions for future use.
 
+        return
 
     def build(self, input_shape):
         """
@@ -260,6 +263,25 @@ class MonsteraBase(tf.keras.layers.Layer):
             `TensorShape` if the layer expects a list of inputs
             (one instance per input).
         """
+
+        # Bits of this are taken from TF.Keras source : https://github.com/tensorflow/tensorflow/blob/r2.0/tensorflow/python/keras/layers/convolutional.py#L146
+        input_shape = tensor_shape.TensorShape(input_shape)
+        if self.data_format == 'channels_first':
+            self.channel_axis = 1
+        else:
+            self.channel_axis = -1
+        if input_shape.dims[self.channel_axis].value is None:
+            raise ValueError('The channel dimension of the inputs '
+                    'should be defined. Found `None`.')
+        input_dim = int(input_shape[self.channel_axis])
+        
+        # Define the Conv Padding
+        if self.padding == 'causal':
+            self.op_padding = 'valid'
+        else:
+            self.op_padding = self.padding
+        if not isinstance(self.op_padding, (list, tuple)):
+            self.op_padding = self.op_padding.upper()
 
         # build the input_shape as a shape Array of ints
         shape = []
@@ -300,6 +322,33 @@ class MonsteraBase(tf.keras.layers.Layer):
         self.output_splits = output_splits
         self.output_split_depth = int(output_size / output_splits) # this should result in a whole number
 
+        # calculate the Channels count of the intermidiate layer with the interleaved results.
+        self.inter_channels_count = self.input_splits * self.output_splits * self.depth_multiplier
+
+        # Define the Indices for the interleaving of outputs
+        self.interleave_indices = []
+        
+        # Loop through the different inputs and build the indexes
+        for index in range(0, int(self.output_splits)): 
+            for inter in range(0, int(self.input_splits)):
+                for multiply in range(0, self.depth_multiplier):
+                    # This is to make sure that each of the output groups recieves values from each input group
+                    start_idx = index 
+                    idx_offset = inter * self.output_splits * self.depth_multiplier 
+                    mult_offset = multiply * self.output_splits
+                    self.interleave_indices.append(  start_idx + idx_offset + mult_offset) 
+
+
+
+        print("self.interleave_indices")
+        print(self.interleave_indices)
+        print("That's all folks")
+
+
+
+        # make the Values a TF constant for use in the graph
+        self.interleave_indices = tf.constant(self.interleave_indices)
+
         # Determine the size of the weights (kernel) matrix
         # The Input Layers weights should be `input_splits` matrixes of size `input_split_depth` by `output_splits` by `self.depth_multiplier`
         self.input_kernel_shape = self.kernel_size + (int(self.input_split_depth), (int(self.output_splits) * int(self.input_splits) * self.depth_multiplier))
@@ -309,7 +358,6 @@ class MonsteraBase(tf.keras.layers.Layer):
         self.output_kernel_shape = self.kernel_size + ((int(self.input_splits) * self.depth_multiplier), (int(self.output_splits) * int(self.output_split_depth))),
         self.output_bias_shape = (int(self.output_splits) * int(self.output_split_depth))
 
-        
         # Build the weight matrixes
         # Input Layer Weights
         self.input_layer_grouped_weights = self.add_weight(name='input_layer_grouped_weights', 
@@ -320,6 +368,7 @@ class MonsteraBase(tf.keras.layers.Layer):
                                       trainable = True,
                                       dtype = self.dtype)
 
+        # TODO: there should be some experiments to see if this performs better with or without bias in the middle
         if self.use_bias:
             self.input_bias = self.add_weight(name='input_layer_grouped_bias',
                             shape=(self.input_bias_shape, ),
@@ -328,6 +377,8 @@ class MonsteraBase(tf.keras.layers.Layer):
                             constraint=self.bias_constraint,
                             trainable=True,
                             dtype=self.dtype)
+        else:
+            self.input_bias = None
 
         # Output Layer Weights
         self.output_layer_grouped_weights = self.add_weight(name='output_layer_grouped_weights', 
@@ -346,32 +397,52 @@ class MonsteraBase(tf.keras.layers.Layer):
                             constraint=self.bias_constraint,
                             trainable=True,
                             dtype=self.dtype)
+        else:
+            self.output_bias = None
+
+        # set up the shape and size of the zero paddings, if needed
+        if(self.zero_pad_inputs > 0):
+            
+            if (self.data_format == 'channels_last'):
+                pad = []
+                # Add blank padding for all dimensions except last
+                for i in range(1, self.input_rank):
+                    pad.append([0,0])
+                # The last dimension is the Channels, so we add the padding for that
+                pad.append([0, self.zero_pad_inputs])
+                # This should pad the input Channels dimension to make it work for the Grouped convolution
+                self.zero_paddings = tf.constant(pad)
+
+            elif (self.data_format == 'channels_first'):
+                # This should pad the input Channels dimension to make it work for the Grouped convolution
+                self.zero_paddings = tf.constant([[0, 0,], [0, self.zero_pad_inputs]])
 
 
 
 
+        # Build the Input Layer Convolution
+        # TODO: this is unlikely to work due to the constraints on the Groupwise Convolution Filter shape, but maybe, so, I'm going to try it anyway 
+        self.input_convolution_op = nn_ops.Convolution(
+                    input_shape,
+                    filter_shape = self.input_layer_grouped_weights.shape,
+                    dilation_rate = self.dilation_rate,
+                    strides = self.strides,
+                    padding = self.op_padding,
+                    data_format = conv_utils.convert_data_format(self.data_format, self.rank + 2))
 
+        # calculate the shape of the Interleaved Intermediate results
+        inter_shape = input_shape.copy()
+        inter_shape[self.channel_axis] = self.inter_channels_count 
 
-        # TODO LOOK THIS OVER
-        
-        # Build the intial the weight matrixes
-        # first weights should be `input_splits` matrixes of size `input_split_depth` by `OUT_splits`
-        self.first_grouped_weights = self.add_weight(name='first_kernel_grouped', 
-                                      #shape=(1, 1, int(self.input_splits), int(self.input_split_depth), int(self.output_splits) ),
-                                      shape=(1, 1, int(self.input_split_depth), int(self.output_splits) * int(self.input_splits) ),
-                                      initializer='uniform',
-                                      trainable=True)
-
-
-        # first weights should be `output_splits` matrixes of size `input_splits` by `output_split_depth`
-        self.last_grouped_weights = self.add_weight(name='last_kernel_grouped', 
-                                      #shape=(1, 1, int(self.output_splits), int(self.input_splits), int(self.output_split_depth) ),
-                                      shape=(1, 1,  int(self.input_splits), int(self.output_splits) * int(self.output_split_depth) ),
-                                      initializer='uniform',
-                                      trainable=True)
-
-
-
+        # Build the Output Layer Convolution
+        # TODO: this is unlikely to work due to the constraints on the Groupwise Convolution Filter shape, but maybe, so, I'm going to try it anyway 
+        self.output_convolution_op = nn_ops.Convolution(
+                    inter_shape, 
+                    filter_shape = self.output_layer_grouped_weights.shape,
+                    dilation_rate = 1,
+                    strides = 1,
+                    padding = "SAME",
+                    data_format = conv_utils.convert_data_format(self.data_format, self.rank + 2))
 
 
 
@@ -381,27 +452,93 @@ class MonsteraBase(tf.keras.layers.Layer):
         return tuple(shape)
 
 
+    def call(self, inputs):
+
+        # Bits of this are taken from TF.Keras source : https://github.com/tensorflow/tensorflow/blob/r2.0/tensorflow/python/keras/layers/convolutional.py#L196
+        # It gets duplicated twice because of the Input Layer/Output Layer relationship
+        
+        # Run the CNN Layer
+        outputs = self.input_convolution_op(inputs, self.input_layer_grouped_weights)
+
+        # Apply the Bias 
+        if self.use_bias:
+            if self.data_format == 'channels_first':
+                if self.rank == 1:
+                    # nn.bias_add does not accept a 1D input tensor.
+                    bias = array_ops.reshape(self.input_bias, (1, self.input_bias_shape, 1))
+                    outputs += bias
+                else:
+                    outputs = nn.bias_add(outputs, self.input_bias, data_format='NCHW')
+            else:
+                outputs = nn.bias_add(outputs, self.input_bias, data_format='NHWC')
+        
+        # Apply the Activation
+        if self.activation is not None:
+            outputs = self.activation(outputs)
+
+        # Interleave the results using tf.gather (https://www.tensorflow.org/api_docs/python/tf/gather)
+        outputs = tf.gather(
+            outputs,
+            self.interleave_indices,
+            axis=self.channel_axis,
+            batch_dims=0
+            )
+        
+        # Run the CNN Layer
+        outputs = self.output_convolution_op(outputs, self.output_layer_grouped_weights)
+
+        # Apply the Bias 
+        if self.use_bias:
+            if self.data_format == 'channels_first':
+                if self.rank == 1:
+                    # nn.bias_add does not accept a 1D input tensor.
+                    bias = array_ops.reshape(self.output_bias, (1, self.output_bias_shape, 1))
+                    outputs += bias
+                else:
+                    outputs = nn.bias_add(outputs, self.output_bias, data_format='NCHW')
+            else:
+                outputs = nn.bias_add(outputs, self.output_bias, data_format='NHWC')
+        
+        # Apply the Activation
+        if self.activation is not None:
+            outputs = self.activation(outputs)
+
+        # Truncate extra outputs if nessisary
+        if self.truncate_output > 0:
+            if (self.data_format == 'channels_last'):
+                # I wish I knew a cleaner way to do this.
+                if self.rank == 1:
+                    outputs = outputs[:, :, 0:(-self.truncate_output)]
+                elif self.rank == 2:
+                    outputs = outputs[:, :, :, 0:(-self.truncate_output)]
+                elif self.rank == 3:
+                    outputs = outputs[:, :, :, :, 0:(-self.truncate_output)]
+                elif self.rank == 4:
+                    outputs = outputs[:, :, :, :, :, 0:(-self.truncate_output)]
+            # Truncate extra channels is easy for channels first.
+            elif (self.data_format == 'channels_first'):
+                outputs = outputs[:, 0:(-self.truncate_output)]
+
+        # Finally return the outputs
+        return outputs
 
 
-    def call(self, inputs, **kwargs):
-        # asdfdsaf
 
 
 
 
-# 1D Convolution Implementation
+# 1D Convolution Implementation 
 # TODO: Implement this later
 
 
-# 2D Convolution Implementation
-
-# TODO: Bulk of work here
-
+# 2D Convolution Implementation 
+# for now, just use Base and set `rank=2,`
 
 
 
-# 3D Convolution Implementation
-# TODO: Implement with this later
 
 
+
+# 3D Convolution Implementation 
+# TODO: Implement with this later 
 
